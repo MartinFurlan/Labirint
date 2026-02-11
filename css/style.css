@@ -1,41 +1,130 @@
-*{
-	margin:0;
-	padding:0;
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root{
+  --bg1:#0f172a;
+  --bg2:#111827;
+  --card: rgba(255,255,255,.08);
+  --card2: rgba(255,255,255,.12);
+  --stroke: rgba(255,255,255,.14);
+  --shadow: 0 20px 60px rgba(0,0,0,.45);
+  --text: rgba(255,255,255,.92);
 }
+html {
+  scrollbar-gutter: stable;
+  overflow-y: scroll;
+}
+
 html, body {
   height: 100%;
-  margin: 0;
-  background: #eee;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  font-family: Arial, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
+  color: var(--text);
 }
 
-.maze-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  flex-direction: column;
-}
-svg {
-  display: block;
-  background: white;
-  box-shadow: 0 0 15px rgba(0, 0, 0, 0.3);
-  max-width: 100%;
-  max-height: 100%;
-  margin-top: 10px;
+body{
+  background:
+    radial-gradient(1200px 700px at 20% 15%, rgba(56,189,248,.25), transparent 55%),
+    radial-gradient(900px 600px at 80% 85%, rgba(168,85,247,.25), transparent 55%),
+    linear-gradient(180deg, var(--bg1), var(--bg2));
+  display: grid;
+  place-items: center;
+  padding: 18px;
 }
 
-button {
-  margin-top: 12px;
-  padding: 10px 20px;
-  font-size: 16px;
+/* layout */
+.app{
+  width: min(860px, 100%);
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+}
+
+/* modern button */
+.btn{
+  appearance: none;
+  border: 1px solid var(--stroke);
+  background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.06));
+  color: var(--text);
+  padding: 12px 20px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  border-radius: 14px;
   cursor: pointer;
-  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0,0,0,.25);
+  transition: transform .12s ease, box-shadow .12s ease, background .2s ease;
+  backdrop-filter: blur(10px);
 }
-.solution {
+
+.btn:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(0,0,0,.35);
+  background: linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,.08));
+}
+
+.btn:active{
+  transform: translateY(1px) scale(.99);
+}
+
+/* card container */
+.maze-container{
+  width: min(560px, 92vw);
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--stroke);
+  background: linear-gradient(180deg, var(--card), rgba(255,255,255,.04));
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+}
+
+svg.maze{
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.25);
+  overflow: hidden;
+}
+
+/* skrita “rešitev” (uporabljamo kot pot) */
+.solution{
   fill: none;
   stroke: red;
   stroke-width: 2;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* HUD zgoraj */
+.hud{
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--stroke);
+  background: rgba(0,0,0,.50);
+  color: rgba(255,255,255,.92);
+  box-shadow: 0 12px 30px rgba(0,0,0,.35);
+  backdrop-filter: blur(10px);
+  font-weight: 700;
+  letter-spacing: .3px;
+  z-index: 9999;
+  user-select: none;
+}
+
+.hud--done{
+  background: rgba(16,185,129,.85); /* emerald */
+  border-color: rgba(16,185,129,.55);
+}
+
+@media (prefers-reduced-motion: no-preference){
+  .hud--pulse{
+    animation: pulse .6s ease;
+  }
+  @keyframes pulse{
+    0%{ transform: translateX(-50%) scale(1); }
+    40%{ transform: translateX(-50%) scale(1.08); }
+    100%{ transform: translateX(-50%) scale(1); }
+  }
 }
