@@ -1,4 +1,3 @@
-// js/js.js
 document.addEventListener("DOMContentLoaded", () => {
   const btn = document.getElementById("startBtn");
   const svg = document.querySelector("svg.maze");
@@ -11,10 +10,8 @@ document.addEventListener("DOMContentLoaded", () => {
     return;
   }
 
-  // solution je samo “pot” (skrita)
   solution.style.opacity = "0";
 
-  // ===== HUD =====
   const hud = document.createElement("div");
   hud.className = "hud";
   document.body.appendChild(hud);
@@ -23,320 +20,720 @@ document.addEventListener("DOMContentLoaded", () => {
     hud.textContent = text;
   }
 
-  // ===== SPACE CONTROL (premik samo ko držiš SPACE) =====
-  let spacePressed = false;
-  let modalOpen = false; // ✅ da SPACE ne zapre SweetAlert
+  const GRID = 16;
+  const OFFSET = 10;
+  const ROWS = 30;
+  const COLS = 30;
 
-  window.addEventListener("keydown", (e) => {
-    if (e.code === "Space") {
-      e.preventDefault();
-      if (modalOpen) return;
-      spacePressed = true;
-    }
-  });
+  const START = { col: 14, row: 0 };
+  const GOAL = { col: 15, row: 29 };
 
-  window.addEventListener("keyup", (e) => {
-    if (e.code === "Space") {
-      e.preventDefault();
-      if (modalOpen) return;
-      spacePressed = false;
-    }
-  });
-
-  // ===== GOAL LOCK / UNLOCK =====
+  let modalOpen = false;
+  let running = false;
   let goalUnlocked = false;
+  let ghostMode = false;
+
+  let keysToCollect = [];
+  let collected = 0;
+
+  let currentCell = { ...START };
+  let moving = false;
+  let moveFrom = null;
+  let moveTo = null;
+  let moveProgress = 0;
+  const MOVE_DURATION = 140;
+
+  const pressedKeys = {
+    ArrowUp: false,
+    ArrowDown: false,
+    ArrowLeft: false,
+    ArrowRight: false,
+  };
+
+  let keyQueue = [];
+
+  function cellToPoint(col, row) {
+    return {
+      x: OFFSET + col * GRID,
+      y: OFFSET + row * GRID,
+    };
+  }
+
+  function sameCell(a, b) {
+    return a.col === b.col && a.row === b.row;
+  }
+
+  function cellKey(col, row) {
+    return `${col},${row}`;
+  }
+
+  function clamp(n, min, max) {
+    return Math.max(min, Math.min(max, n));
+  }
+
+  function shuffle(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+function drawLockedDoor() {
+  goal.innerHTML = "";
+
+  const door = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  door.setAttribute("x", "-9");
+  door.setAttribute("y", "-11");
+  door.setAttribute("width", "18");
+  door.setAttribute("height", "22");
+  door.setAttribute("rx", "2");
+  door.setAttribute("fill", "#5f6973");
+  door.setAttribute("stroke", "#2b3138");
+  door.setAttribute("stroke-width", "2");
+
+  goal.appendChild(door);
+
+  // navpične rešetke
+  for (let i = -6; i <= 6; i += 4) {
+    const bar = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    bar.setAttribute("x1", i);
+    bar.setAttribute("y1", "-11");
+    bar.setAttribute("x2", i);
+    bar.setAttribute("y2", "11");
+    bar.setAttribute("stroke", "#c9d1d8");
+    bar.setAttribute("stroke-width", "1.6");
+    goal.appendChild(bar);
+  }
+
+
+  const cross = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  cross.setAttribute("x1", "-9");
+  cross.setAttribute("y1", "-2");
+  cross.setAttribute("x2", "9");
+  cross.setAttribute("y2", "-2");
+  cross.setAttribute("stroke", "#aeb6bd");
+  cross.setAttribute("stroke-width", "1.5");
+
+  goal.appendChild(cross);
+
+
+  const lock = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  lock.setAttribute("x", "-2");
+  lock.setAttribute("y", "3");
+  lock.setAttribute("width", "4");
+  lock.setAttribute("height", "5");
+  lock.setAttribute("rx", "1");
+  lock.setAttribute("fill", "#d6b34b");
+  lock.setAttribute("stroke", "#6a5318");
+  lock.setAttribute("stroke-width", "1");
+
+  goal.appendChild(lock);
+
+  goal.setAttribute("opacity", "0.9");
+}
+
+  function drawUnlockedDoor() {
+  goal.innerHTML = "";
+  goal.style.display = "none";
+
+  const door = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  door.setAttribute("x", "-9");
+  door.setAttribute("y", "-11");
+  door.setAttribute("width", "18");
+  door.setAttribute("height", "22");
+  door.setAttribute("rx", "2");
+  door.setAttribute("fill", "#7d8a96");
+  door.setAttribute("stroke", "#2b3138");
+  door.setAttribute("stroke-width", "2");
+
+  goal.appendChild(door);
+
+  // rešetke
+  for (let i = -6; i <= 6; i += 4) {
+    const bar = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    bar.setAttribute("x1", i);
+    bar.setAttribute("y1", "-11");
+    bar.setAttribute("x2", i);
+    bar.setAttribute("y2", "11");
+    bar.setAttribute("stroke", "#e1e6eb");
+    bar.setAttribute("stroke-width", "1.6");
+    goal.appendChild(bar);
+  }
+
+  // odprta ključavnica
+  const opening = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  opening.setAttribute("cx", "0");
+  opening.setAttribute("cy", "5");
+  opening.setAttribute("r", "2");
+  opening.setAttribute("fill", "#d6b34b");
+
+  goal.appendChild(opening);
+
+  goal.setAttribute("opacity", "1");
+}
 
   function lockGoal() {
     goalUnlocked = false;
-    goal.setAttribute("fill", "#9aa0a6");
-    goal.setAttribute("opacity", "0.65");
     hud.classList.remove("hud--done", "hud--pulse");
+    drawLockedDoor();
   }
 
   function unlockGoal() {
     goalUnlocked = true;
-    goal.setAttribute("fill", "dodgerblue");
-    goal.setAttribute("opacity", "1");
+    drawUnlockedDoor();
 
-    // mali bounce
     goal.style.transition = "transform 0.2s ease";
     goal.style.transformOrigin = "center";
-    goal.style.transform = "scale(1.25)";
-    setTimeout(() => (goal.style.transform = "scale(1)"), 200);
+    goal.style.transform = "scale(1.2)";
 
-    // izpis zgoraj
-    hud.textContent = "VSE TOČKE POBRANE! Pojdi do cilja 🔓";
+    setTimeout(() => {
+      goal.style.transform = "scale(1)";
+    }, 200);
+
+    setHud("VSI KLJUČI POBRANI! ODKLENI IZHOD");
     hud.classList.add("hud--done", "hud--pulse");
-    setTimeout(() => hud.classList.remove("hud--pulse"), 700);
+
+    setTimeout(() => {
+      hud.classList.remove("hud--pulse");
+    }, 700);
   }
 
-  // ===== PARSE PATH POINTS =====
-  function parsePoints(polyline) {
-    const raw = (polyline.getAttribute("points") || "").trim();
-    const tokens = raw.replace(/\s+/g, " ").split(" ").filter(Boolean);
-    const pts = [];
-    for (const t of tokens) {
-      const [xs, ys] = t.split(",");
-      const x = parseFloat(xs);
-      const y = parseFloat(ys);
-      if (Number.isFinite(x) && Number.isFinite(y)) pts.push({ x, y });
-    }
-    return pts;
-  }
+  let stepToggle = false;
+let lastFootprintX = null;
+let lastFootprintY = null;
 
-  const pts = parsePoints(solution);
-  if (pts.length < 2) {
-    console.error("Solution polyline nima dovolj točk.");
+function resetTrail() {
+  stepToggle = false;
+  lastFootprintX = null;
+  lastFootprintY = null;
+}
+
+function addTrail(x, y) {
+  if (
+    lastFootprintX !== null &&
+    Math.hypot(x - lastFootprintX, y - lastFootprintY) < 10
+  ) {
     return;
   }
 
-  // ===== TRAIL (zelena črta za igralcem) =====
-  const trail = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
-  trail.setAttribute("fill", "none");
-  trail.setAttribute("stroke", "green");
-  trail.setAttribute("stroke-width", "3");
-  trail.setAttribute("stroke-linecap", "round");
-  trail.setAttribute("stroke-linejoin", "round");
-  trail.style.pointerEvents = "none";
-  svg.insertBefore(trail, player);
+  stepToggle = !stepToggle;
 
-  let trailPts = [];
+  const offsetX = stepToggle ? -2.2 : 2.2;
+  const offsetY = 0.8;
 
-  function resetTrail() {
-    trailPts = [];
-    trail.setAttribute("points", "");
-  }
+  const footprint = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
+  footprint.setAttribute("cx", x + offsetX);
+  footprint.setAttribute("cy", y + offsetY);
+  footprint.setAttribute("rx", "1.4");
+  footprint.setAttribute("ry", "2.4");
+  footprint.setAttribute("fill", "#3f4348");
+  footprint.setAttribute("opacity", "0.55");
+  footprint.style.pointerEvents = "none";
 
-  function addTrail(x, y) {
-    const last = trailPts[trailPts.length - 1];
-    if (last && Math.hypot(x - last.x, y - last.y) < 2) return;
-    trailPts.push({ x, y });
-    trail.setAttribute("points", trailPts.map(p => `${p.x},${p.y}`).join(" "));
-  }
+  svg.insertBefore(footprint, player);
 
-  function setPlayer(x, y) {
-    player.setAttribute("cx", String(x));
-    player.setAttribute("cy", String(y));
-    addTrail(x, y);
-  }
+  lastFootprintX = x;
+  lastFootprintY = y;
 
-  // ===== TOČKE =====
-  let dots = []; // {el, x, y}
-  let collected = 0;
+  setTimeout(() => {
+    footprint.remove();
+  }, 2500);
+}
 
-  function clearDots() {
-    for (const d of dots) d.el.remove();
-    dots = [];
+ function setPlayer(x, y) {
+  player.setAttribute("transform", `translate(${x},${y})`);
+  addTrail(x, y);
+}
+
+function placePlayerOnCell(cell) {
+  const p = cellToPoint(cell.col, cell.row);
+  player.setAttribute("transform", `translate(${p.x},${p.y})`);
+  addTrail(p.x, p.y);
+}
+
+  function clearKeys() {
+    for (const item of keysToCollect) {
+      item.el.remove();
+    }
+    keysToCollect = [];
     collected = 0;
   }
 
-  function makeDot(x, y) {
-    const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    c.setAttribute("cx", String(x));
-    c.setAttribute("cy", String(y));
-    c.setAttribute("r", "4");
-    c.setAttribute("fill", "red");
-    c.setAttribute("opacity", "0.95");
-    c.style.pointerEvents = "none";
-    svg.insertBefore(c, player);
-    return c;
+  function makeKey(x, y) {
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("transform", `translate(${x}, ${y})`);
+    g.style.pointerEvents = "none";
+
+    const ring = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    ring.setAttribute("cx", "-3");
+    ring.setAttribute("cy", "0");
+    ring.setAttribute("r", "4");
+    ring.setAttribute("fill", "none");
+    ring.setAttribute("stroke", "#d6b34b");
+    ring.setAttribute("stroke-width", "2");
+
+    const shaft = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    shaft.setAttribute("x1", "1");
+    shaft.setAttribute("y1", "0");
+    shaft.setAttribute("x2", "8");
+    shaft.setAttribute("y2", "0");
+    shaft.setAttribute("stroke", "#d6b34b");
+    shaft.setAttribute("stroke-width", "2");
+
+    const tooth1 = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    tooth1.setAttribute("x1", "5");
+    tooth1.setAttribute("y1", "0");
+    tooth1.setAttribute("x2", "5");
+    tooth1.setAttribute("y2", "3");
+    tooth1.setAttribute("stroke", "#d6b34b");
+    tooth1.setAttribute("stroke-width", "2");
+
+    const tooth2 = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    tooth2.setAttribute("x1", "8");
+    tooth2.setAttribute("y1", "0");
+    tooth2.setAttribute("x2", "8");
+    tooth2.setAttribute("y2", "2");
+    tooth2.setAttribute("stroke", "#d6b34b");
+    tooth2.setAttribute("stroke-width", "2");
+
+    g.appendChild(ring);
+    g.appendChild(shaft);
+    g.appendChild(tooth1);
+    g.appendChild(tooth2);
+
+    svg.insertBefore(g, player);
+    return g;
   }
 
-  function spawnRandomDots(count) {
-    clearDots();
-
-    const totalLen = solution.getTotalLength();
-    const minL = totalLen * 0.03;
-    const maxL = totalLen * 0.97;
-
-    const chosen = [];
-    const minAlong = totalLen / (count * 1.2);
-
-    let tries = 0;
-    while (chosen.length < count && tries < count * 60) {
-      tries++;
-      const l = minL + Math.random() * (maxL - minL);
-
-      let ok = true;
-      for (const cl of chosen) {
-        if (Math.abs(cl - l) < minAlong) { ok = false; break; }
-      }
-      if (!ok) continue;
-
-      chosen.push(l);
-    }
-
-    chosen.sort((a, b) => a - b);
-
-    for (const l of chosen) {
-      const p = solution.getPointAtLength(l);
-      const el = makeDot(p.x, p.y);
-      dots.push({ el, x: p.x, y: p.y });
-    }
-
-    setHud(`TOČKE: 0 / ${dots.length}`);
+  function lineKey(x1, y1, x2, y2) {
+    const a = `${x1},${y1}`;
+    const b = `${x2},${y2}`;
+    return a < b ? `${a}|${b}` : `${b}|${a}`;
   }
 
-  function eatDotsIfTouching() {
-    const px = parseFloat(player.getAttribute("cx"));
-    const py = parseFloat(player.getAttribute("cy"));
-    const pr = parseFloat(player.getAttribute("r")) || 5;
+  function getMazeLines() {
+    const g = svg.querySelector("g");
+    if (!g) return [];
+    return Array.from(g.querySelectorAll("line")).map(line => ({
+      x1: parseFloat(line.getAttribute("x1")),
+      y1: parseFloat(line.getAttribute("y1")),
+      x2: parseFloat(line.getAttribute("x2")),
+      y2: parseFloat(line.getAttribute("y2")),
+    }));
+  }
 
-    const DOT_R = 4;
-    const EAT_DIST = pr + DOT_R + 1;
+  const wallSet = new Set();
 
-    let changed = false;
+  function addSegmentWall(x1, y1, x2, y2) {
+    wallSet.add(lineKey(x1, y1, x2, y2));
+  }
 
-    dots = dots.filter(d => {
-      const hit = Math.hypot(px - d.x, py - d.y) <= EAT_DIST;
-      if (hit) {
-        d.el.remove();
-        collected++;
-        changed = true;
-        return false;
+  function buildWallSet() {
+    wallSet.clear();
+
+    const lines = getMazeLines();
+
+    for (const l of lines) {
+      if (Math.abs(l.y1 - l.y2) < 0.001) {
+        const y = l.y1;
+        const minX = Math.min(l.x1, l.x2);
+        const maxX = Math.max(l.x1, l.x2);
+
+        for (let x = minX; x < maxX - 0.001; x += GRID) {
+          addSegmentWall(x, y, x + GRID, y);
+        }
+      } else if (Math.abs(l.x1 - l.x2) < 0.001) {
+        const x = l.x1;
+        const minY = Math.min(l.y1, l.y2);
+        const maxY = Math.max(l.y1, l.y2);
+
+        for (let y = minY; y < maxY - 0.001; y += GRID) {
+          addSegmentWall(x, y, x, y + GRID);
+        }
       }
-      return true;
+    }
+  }
+
+  function hasHorizontalWall(x1, x2, y) {
+    return wallSet.has(lineKey(x1, y, x2, y));
+  }
+
+  function hasVerticalWall(x, y1, y2) {
+    return wallSet.has(lineKey(x, y1, x, y2));
+  }
+
+  function canMove(col, row, dir) {
+    if (ghostMode) {
+      if (dir === "up") return row > 0;
+      if (dir === "down") return row < ROWS - 1;
+      if (dir === "left") return col > 0;
+      if (dir === "right") return col < COLS - 1;
+      return false;
+    }
+
+    if (dir === "up") {
+      if (row <= 0) return false;
+      const y = 2 + row * GRID;
+      const x1 = 2 + col * GRID;
+      const x2 = x1 + GRID;
+      return !hasHorizontalWall(x1, x2, y);
+    }
+
+    if (dir === "down") {
+      if (row >= ROWS - 1) return false;
+      const y = 2 + (row + 1) * GRID;
+      const x1 = 2 + col * GRID;
+      const x2 = x1 + GRID;
+      return !hasHorizontalWall(x1, x2, y);
+    }
+
+    if (dir === "left") {
+      if (col <= 0) return false;
+      const x = 2 + col * GRID;
+      const y1 = 2 + row * GRID;
+      const y2 = y1 + GRID;
+      return !hasVerticalWall(x, y1, y2);
+    }
+
+    if (dir === "right") {
+      if (col >= COLS - 1) return false;
+      const x = 2 + (col + 1) * GRID;
+      const y1 = 2 + row * GRID;
+      const y2 = y1 + GRID;
+      return !hasVerticalWall(x, y1, y2);
+    }
+
+    return false;
+  }
+
+  function getNeighbors(cell) {
+    const result = [];
+
+    if (canMove(cell.col, cell.row, "up")) {
+      result.push({ col: cell.col, row: cell.row - 1 });
+    }
+    if (canMove(cell.col, cell.row, "down")) {
+      result.push({ col: cell.col, row: cell.row + 1 });
+    }
+    if (canMove(cell.col, cell.row, "left")) {
+      result.push({ col: cell.col - 1, row: cell.row });
+    }
+    if (canMove(cell.col, cell.row, "right")) {
+      result.push({ col: cell.col + 1, row: cell.row });
+    }
+
+    return result;
+  }
+
+  function getReachableCells(startCell) {
+    const visited = new Set();
+    const queue = [startCell];
+    const result = [];
+
+    visited.add(cellKey(startCell.col, startCell.row));
+
+    while (queue.length) {
+      const current = queue.shift();
+      result.push(current);
+
+      for (const neighbor of getNeighbors(current)) {
+        const k = cellKey(neighbor.col, neighbor.row);
+        if (!visited.has(k)) {
+          visited.add(k);
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  function spawnRandomKeys(count) {
+    clearKeys();
+
+    const reachable = getReachableCells(START).filter(cell => {
+      return !sameCell(cell, START) && !sameCell(cell, GOAL);
     });
 
-    if (changed && !goalUnlocked) {
-      setHud(`TOČKE: ${collected} / ${collected + dots.length}`);
+    const selected = shuffle(reachable).slice(0, Math.min(count, reachable.length));
+
+    for (const cell of selected) {
+      const p = cellToPoint(cell.col, cell.row);
+      const el = makeKey(p.x, p.y);
+
+      keysToCollect.push({
+        el,
+        x: p.x,
+        y: p.y,
+        col: cell.col,
+        row: cell.row,
+      });
     }
 
-    if (!goalUnlocked && dots.length === 0) {
-      unlockGoal();
+    setHud(`KLJUČI: 0 / ${keysToCollect.length}`);
+  }
+
+ function collectKeysIfTouching() {
+  const transform = player.getAttribute("transform") || "translate(0,0)";
+  const match = transform.match(/translate\(([-\d.]+),([-\d.]+)\)/);
+
+  const px = match ? parseFloat(match[1]) : 0;
+  const py = match ? parseFloat(match[2]) : 0;
+
+  const TOUCH_DIST = 8;
+  let changed = false;
+
+  keysToCollect = keysToCollect.filter(item => {
+    const hit = Math.hypot(px - item.x, py - item.y) <= TOUCH_DIST;
+    if (hit) {
+      item.el.remove();
+      collected++;
+      changed = true;
+      return false;
+    }
+    return true;
+  });
+
+  if (changed && !goalUnlocked) {
+    if (ghostMode) {
+      setHud(`CHEAT MODE | KLJUČI: ${collected} / ${collected + keysToCollect.length}`);
+    } else {
+      setHud(`KLJUČI: ${collected} / ${collected + keysToCollect.length}`);
     }
   }
+
+  if (!goalUnlocked && keysToCollect.length === 0) {
+    unlockGoal();
+  }
+}
 
   function checkWin() {
-    if (!goalUnlocked) return false;
+  if (!goalUnlocked) return false;
 
-    const px = parseFloat(player.getAttribute("cx"));
-    const py = parseFloat(player.getAttribute("cy"));
-    const pr = parseFloat(player.getAttribute("r")) || 5;
+  const transform = player.getAttribute("transform") || "translate(0,0)";
+  const match = transform.match(/translate\(([-\d.]+),([-\d.]+)\)/);
 
-    const gx = parseFloat(goal.getAttribute("cx"));
-    const gy = parseFloat(goal.getAttribute("cy"));
-    const gr = parseFloat(goal.getAttribute("r")) || 7;
+  const px = match ? parseFloat(match[1]) : 0;
+  const py = match ? parseFloat(match[2]) : 0;
 
-    const onGoal = Math.hypot(px - gx, py - gy) <= pr + gr;
-    if (!onGoal) return false;
+  const gx = parseFloat(goal.getAttribute("data-x"));
+  const gy = parseFloat(goal.getAttribute("data-y"));
 
-    // ✅ ustavi igro + reset SPACE + prepreči da SPACE zapre alert
-    running = false;
-    spacePressed = false;
-    modalOpen = true;
+  const winDistance = 10;
+  const onGoal = Math.hypot(px - gx, py - gy) <= winDistance;
 
-    // če SweetAlert ni naložen, vsaj ne crasha
-    if (typeof Swal === "undefined") {
-      alert("SUPER! (SweetAlert2 ni naložen – preveri script v HTML)");
-      location.reload();
-      return true;
-    }
+  if (!onGoal) return false;
 
-    Swal.fire({
-		title: "SUPER! 🎉",
-		text: "Pobral si vse TOČKE in prišel do cilja!",
-		icon: "success",
-		confirmButtonText: "Igraj znova",
-		
+  running = false;
+  modalOpen = true;
+  moving = false;
+  keyQueue = [];
 
-		focusConfirm: false,
-		allowOutsideClick: false,
-		allowEscapeKey: false,
-
-		scrollbarPadding: false,   // 🔥 prepreči premik layouta
-		heightAuto: false,         // 🔥 še dodatna stabilizacija
-
-		didOpen: () => {
-			const el = document.activeElement;
-			if (el && typeof el.blur === "function") el.blur();
-		}
-		}).then(() => {
-		modalOpen = false;
-		location.reload();
-		});
-
-	return true;
-
+  if (typeof Swal === "undefined") {
+    alert("Uspeh! Pobral si vse ključe in odklenil izhod!");
+    location.reload();
+    return true;
   }
 
-  // ===== GAME STATE =====
-  let running = false;
-  let seg = 0;
-  let tOnSeg = 0;
-  let lastTime = null;
+  Swal.fire({
+    title: "POBEG USPEL!",
+    text: "Pobral si vse ključe in odklenil izhod!",
+    icon: "success",
+    confirmButtonText: "Igraj znova",
+    buttonsStyling: false,
+    customClass: {
+      popup: "prison-popup",
+      title: "prison-title",
+      htmlContainer: "prison-text",
+      confirmButton: "prison-confirm btn"
+    },
+    focusConfirm: false,
+    allowOutsideClick: false,
+    allowEscapeKey: false,
+    scrollbarPadding: false,
+    heightAuto: false
+  }).then(() => {
+    modalOpen = false;
+    location.reload();
+  });
+
+  return true;
+}
+
+  function directionFromKey(key) {
+    if (key === "ArrowUp") return "up";
+    if (key === "ArrowDown") return "down";
+    if (key === "ArrowLeft") return "left";
+    if (key === "ArrowRight") return "right";
+    return null;
+  }
+
+  function nextCellFromDirection(cell, dir) {
+    if (dir === "up") return { col: cell.col, row: cell.row - 1 };
+    if (dir === "down") return { col: cell.col, row: cell.row + 1 };
+    if (dir === "left") return { col: cell.col - 1, row: cell.row };
+    if (dir === "right") return { col: cell.col + 1, row: cell.row };
+    return { ...cell };
+  }
+
+  function getWantedDirection() {
+    for (let i = keyQueue.length - 1; i >= 0; i--) {
+      const key = keyQueue[i];
+      if (pressedKeys[key]) return directionFromKey(key);
+    }
+    return null;
+  }
+
+  function tryStartMove() {
+    if (!running || moving) return;
+
+    const dir = getWantedDirection();
+    if (!dir) return;
+
+    if (!canMove(currentCell.col, currentCell.row, dir)) return;
+
+    moveFrom = { ...currentCell };
+    moveTo = nextCellFromDirection(currentCell, dir);
+    moveProgress = 0;
+    moving = true;
+  }
 
   function startGame() {
     running = true;
-    seg = 0;
-    tOnSeg = 0;
-    lastTime = null;
+    modalOpen = false;
+    moving = false;
+    moveFrom = null;
+    moveTo = null;
+    moveProgress = 0;
+    keyQueue = [];
+
+    for (const key of Object.keys(pressedKeys)) {
+      pressedKeys[key] = false;
+    }
 
     resetTrail();
     lockGoal();
-    spawnRandomDots(25);
+    spawnRandomKeys(5);
 
-    // STOJI na začetku
-    setPlayer(pts[0].x, pts[0].y);
+    currentCell = { ...START };
+    placePlayerOnCell(currentCell);
+    collectKeysIfTouching();
 
-    setHud("Drži SPACE za premikanje");
+    if (ghostMode) {
+      setHud(`CHEAT MODE | KLJUČI: ${collected} / ${collected + keysToCollect.length}`);
+    } else {
+      setHud(`KLJUČI: ${collected} / ${collected + keysToCollect.length}`);
+    }
   }
 
-  // ===== ANIMATION LOOP (premika se samo ko držiš SPACE) =====
+  let lastTime = null;
+
   function animate(timestamp) {
     requestAnimationFrame(animate);
 
-    if (!running) return;
-
-    if (!spacePressed) {
-      lastTime = null; // da ne skoči, ko spet držiš space
+    if (!running) {
+      lastTime = timestamp;
       return;
     }
 
-    if (lastTime == null) lastTime = timestamp;
-    const dt = (timestamp - lastTime) / 1000;
+    if (lastTime == null) {
+      lastTime = timestamp;
+      return;
+    }
+
+    const dt = timestamp - lastTime;
     lastTime = timestamp;
 
-    const SPEED = 120; // px/s
-    if (seg >= pts.length - 1) return;
+    if (!moving) {
+      tryStartMove();
+      return;
+    }
 
-    let move = SPEED * dt;
+    moveProgress += dt / MOVE_DURATION;
+    const t = clamp(moveProgress, 0, 1);
 
-    while (move > 0 && seg < pts.length - 1) {
-      const a = pts[seg];
-      const b = pts[seg + 1];
+    const a = cellToPoint(moveFrom.col, moveFrom.row);
+    const b = cellToPoint(moveTo.col, moveTo.row);
 
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const len = Math.hypot(dx, dy) || 0.00001;
+    const x = a.x + (b.x - a.x) * t;
+    const y = a.y + (b.y - a.y) * t;
+    setPlayer(x, y);
 
-      const remaining = len - tOnSeg;
-      const take = Math.min(move, remaining);
+    if (t >= 1) {
+      currentCell = { ...moveTo };
+      moving = false;
+      moveFrom = null;
+      moveTo = null;
+      moveProgress = 0;
 
-      tOnSeg += take;
-      move -= take;
-
-      const u = tOnSeg / len;
-      const x = a.x + dx * u;
-      const y = a.y + dy * u;
-
-      setPlayer(x, y);
-      eatDotsIfTouching();
+      collectKeysIfTouching();
       if (checkWin()) return;
 
-      if (tOnSeg >= len - 1e-6) {
-        seg++;
-        tOnSeg = 0;
-      }
+      tryStartMove();
     }
   }
 
-  requestAnimationFrame(animate);
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "F4") {
+      e.preventDefault();
+      ghostMode = !ghostMode;
 
-  // ===== START =====
+      if (ghostMode) {
+        if (running) {
+          setHud(`CHEAT MODE | KLJUČI: ${collected} / ${collected + keysToCollect.length}`);
+        } else {
+          setHud("CHEAT MODE vklopljen — klikni START");
+        }
+      } else {
+        if (running) {
+          if (goalUnlocked) {
+            setHud("VSI KLJUČI POBRANI! ODKLENI IZHOD");
+          } else {
+            setHud(`KLJUČI: ${collected} / ${collected + keysToCollect.length}`);
+          }
+        } else {
+          setHud("Klikni START in poberi 5 ključev");
+        }
+      }
+      return;
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(pressedKeys, e.key)) return;
+    e.preventDefault();
+    if (modalOpen) return;
+
+    if (!pressedKeys[e.key]) {
+      keyQueue.push(e.key);
+    }
+
+    pressedKeys[e.key] = true;
+
+    if (running && !moving) {
+      tryStartMove();
+    }
+  });
+
+  window.addEventListener("keyup", (e) => {
+    if (!Object.prototype.hasOwnProperty.call(pressedKeys, e.key)) return;
+    e.preventDefault();
+    if (modalOpen) return;
+
+    pressedKeys[e.key] = false;
+    keyQueue = keyQueue.filter(key => key !== e.key);
+  });
+
+  buildWallSet();
+
+  const goalPoint = cellToPoint(GOAL.col, GOAL.row);
+  goal.setAttribute("transform", `translate(${goalPoint.x},${goalPoint.y})`);
+  goal.setAttribute("data-x", String(goalPoint.x));
+  goal.setAttribute("data-y", String(goalPoint.y));
+
   btn.addEventListener("click", startGame);
 
-  // init
   lockGoal();
-  setHud("Klikni START (potem drži SPACE)");
+  setHud("Klikni START in poberi 5 ključev");
+  requestAnimationFrame(animate);
 });
