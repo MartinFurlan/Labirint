@@ -95,7 +95,7 @@ function drawLockedDoor() {
 
   goal.appendChild(door);
 
-  // navpične rešetke
+  
   for (let i = -6; i <= 6; i += 4) {
     const bar = document.createElementNS("http://www.w3.org/2000/svg", "line");
     bar.setAttribute("x1", i);
@@ -150,7 +150,7 @@ function drawLockedDoor() {
 
   goal.appendChild(door);
 
-  // rešetke
+  
   for (let i = -6; i <= 6; i += 4) {
     const bar = document.createElementNS("http://www.w3.org/2000/svg", "line");
     bar.setAttribute("x1", i);
@@ -162,7 +162,7 @@ function drawLockedDoor() {
     goal.appendChild(bar);
   }
 
-  // odprta ključavnica
+  
   const opening = document.createElementNS("http://www.w3.org/2000/svg", "circle");
   opening.setAttribute("cx", "0");
   opening.setAttribute("cy", "5");
@@ -736,4 +736,5 @@ function placePlayerOnCell(cell) {
   lockGoal();
   setHud("Klikni START in poberi 5 ključev");
   requestAnimationFrame(animate);
+
 });
