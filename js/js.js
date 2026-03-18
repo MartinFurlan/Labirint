@@ -1,448 +1,321 @@
-document.addEventListener("DOMContentLoaded", () => {
-  const btn = document.getElementById("startBtn");
+document.addEventListener("DOMContentLoaded", function () {
+  // Počakamo, da se celoten HTML naloži, potem šele zaženemo kodo.
+
+  const startBtn = document.getElementById("startBtn");
+  const mazeTitle = document.querySelector(".maze-title");
   const svg = document.querySelector("svg.maze");
-  const solution = document.getElementById("solution");
   const player = document.getElementById("player");
   const goal = document.getElementById("goal");
+  const solution = document.getElementById("solution");
+  const instructionsText = document.getElementById("instructionsText");
+  const statsText = document.getElementById("statsText");
 
-  if (!btn || !svg || !solution || !player || !goal) {
-    console.error("Manjka startBtn / svg.maze / #solution / #player / #goal");
+  // Preverimo, če vsi pomembni HTML elementi obstajajo.
+  // Če kaj manjka, se igra ne more pravilno zagnati.
+  if (!startBtn || !mazeTitle || !svg || !player || !goal || !instructionsText || !statsText) {
+    console.error("Manjka kak element v HTML.");
     return;
   }
 
-  solution.style.opacity = "0";
-
-  const hud = document.createElement("div");
-  hud.className = "hud";
-  document.body.appendChild(hud);
-
-  function setHud(text) {
-    hud.textContent = text;
+  // Če obstaja element za rešitev, ga na začetku skrijemo.
+  if (solution) {
+    solution.style.opacity = "0";
   }
 
-  const GRID = 16;
-  const OFFSET = 10;
-  const ROWS = 30;
-  const COLS = 30;
+  // Konstante za gibanje in velikost mreže
+  const STEP = 16;         // Velikost enega koraka po mreži
+  const HALF = 8;          // Polovica koraka (uporabno za preverjanje zidov)
+  const MIN = 10;          // Najmanjša dovoljena koordinata
+  const MAX = 474;         // Največja dovoljena koordinata
+  const KEY_COUNT = 5;     // Koliko ključev mora igralec pobrati
+  const MOVE_TIME = 120;   // Čas animacije enega koraka v ms
+  const START = { x: 234, y: 10 };    // Začetna pozicija igralca
+  const END = { x: 250, y: 474 };     // Končni cilj
 
-  const START = { col: 14, row: 0 };
-  const GOAL = { col: 15, row: 29 };
+  // Trenutna pozicija igralca
+  let x = START.x;
+  let y = START.y;
 
-  let modalOpen = false;
-  let running = false;
-  let goalUnlocked = false;
-  let ghostMode = false;
+  // Spremenljivke za animacijo premika
+  let fromX = START.x;
+  let fromY = START.y;
+  let toX = START.x;
+  let toY = START.y;
 
-  let keysToCollect = [];
-  let collected = 0;
+  // Stanje igre
+  let gameRunning = false;   // Ali igra trenutno teče
+  let moving = false;        // Ali se igralec trenutno premika
+  let cheatMode = false;     // Cheat mode ignorira zidove
+  let goalUnlocked = false;  // Ali je cilj odklenjen
 
-  let currentCell = { ...START };
-  let moving = false;
-  let moveFrom = null;
-  let moveTo = null;
-  let moveProgress = 0;
-  const MOVE_DURATION = 140;
+  let moveProgress = 0;      // Napredek trenutne animacije (0 do 1)
+  let lastTime = null;       // Čas prejšnjega frame-a
+  let collectedKeys = 0;     // Število pobranih ključev
+  let keys = [];             // Seznam aktivnih ključev na mapi
+  let moveCount = 0;         // Število premikov
 
+  let startTime = 0;         // Čas začetka igre
+  let finishTime = 0;        // Čas konca igre
+
+  // Sem shranimo vse zidove v obliki povezav med točkami
+  const walls = new Set();
+
+  // Evidenca pritisnjenih tipk
   const pressedKeys = {
     ArrowUp: false,
     ArrowDown: false,
     ArrowLeft: false,
-    ArrowRight: false,
+    ArrowRight: false
   };
 
-  let keyQueue = [];
+  // Vrstni red tipk, da vemo katera smer ima prednost
+  let keyOrder = [];
 
-  function cellToPoint(col, row) {
-    return {
-      x: OFFSET + col * GRID,
-      y: OFFSET + row * GRID,
-    };
+  // Prikaže navodila na strani
+  function showInstructions() {
+    instructionsText.innerHTML =
+      "• Poberi 5 ključev.<br>" +
+      "• Nato pojdi na zeleni cilj.<br>" +
+      "• Premikanje: puščice.<br>" +
+      "• F4 = cheat mode.";
   }
 
-  function sameCell(a, b) {
-    return a.col === b.col && a.row === b.row;
+  // Nastavi HTML za statistiko
+  function setStatsHtml(html) {
+    statsText.innerHTML = html;
   }
 
-  function cellKey(col, row) {
-    return `${col},${row}`;
-  }
-
-  function clamp(n, min, max) {
-    return Math.max(min, Math.min(max, n));
-  }
-
-  function shuffle(arr) {
-    const a = [...arr];
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
+  // Vrne čas igre kot tekst
+  function getTimeText() {
+    // Če igra še ni začela in tudi ni končana
+    if (!gameRunning && finishTime === 0) {
+      return "0.0 s";
     }
-    return a;
+
+    let seconds = 0;
+
+    // Če igra teče, računamo čas od začetka do zdaj
+    if (gameRunning) {
+      seconds = (performance.now() - startTime) / 1000;
+    } else {
+      // Če je konec, računamo skupni čas
+      seconds = (finishTime - startTime) / 1000;
+    }
+
+    return seconds.toFixed(1) + " s";
   }
 
-function drawLockedDoor() {
-  goal.innerHTML = "";
+  // Posodobi statistiko na zaslonu
+  function updateStats() {
+    const keyText = `Ključi: ${collectedKeys} / ${collectedKeys + keys.length}`;
+    const moveText = `Premiki: ${moveCount}`;
+    const timeText = `Čas: ${getTimeText()}`;
 
-  const door = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  door.setAttribute("x", "-9");
-  door.setAttribute("y", "-11");
-  door.setAttribute("width", "18");
-  door.setAttribute("height", "22");
-  door.setAttribute("rx", "2");
-  door.setAttribute("fill", "#5f6973");
-  door.setAttribute("stroke", "#2b3138");
-  door.setAttribute("stroke-width", "2");
+    let html = `${keyText}<br>${moveText}<br>${timeText}`;
 
-  goal.appendChild(door);
+    // Če so vsi ključi pobrani, pokažemo da je cilj odklenjen
+    if (goalUnlocked) {
+      html = `CILJ ODKLENJEN<br>${moveText}<br>${timeText}`;
+    }
 
-  
-  for (let i = -6; i <= 6; i += 4) {
-    const bar = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    bar.setAttribute("x1", i);
-    bar.setAttribute("y1", "-11");
-    bar.setAttribute("x2", i);
-    bar.setAttribute("y2", "11");
-    bar.setAttribute("stroke", "#c9d1d8");
-    bar.setAttribute("stroke-width", "1.6");
-    goal.appendChild(bar);
+    // Če je cheat mode vključen, to še dodatno napišemo
+    if (cheatMode && gameRunning) {
+      html = `CHEAT MODE<br>${html}`;
+    }
+
+    setStatsHtml(html);
   }
 
-
-  const cross = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  cross.setAttribute("x1", "-9");
-  cross.setAttribute("y1", "-2");
-  cross.setAttribute("x2", "9");
-  cross.setAttribute("y2", "-2");
-  cross.setAttribute("stroke", "#aeb6bd");
-  cross.setAttribute("stroke-width", "1.5");
-
-  goal.appendChild(cross);
-
-
-  const lock = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  lock.setAttribute("x", "-2");
-  lock.setAttribute("y", "3");
-  lock.setAttribute("width", "4");
-  lock.setAttribute("height", "5");
-  lock.setAttribute("rx", "1");
-  lock.setAttribute("fill", "#d6b34b");
-  lock.setAttribute("stroke", "#6a5318");
-  lock.setAttribute("stroke-width", "1");
-
-  goal.appendChild(lock);
-
-  goal.setAttribute("opacity", "0.9");
-}
-
-  function drawUnlockedDoor() {
-  goal.innerHTML = "";
-  goal.style.display = "none";
-
-  const door = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  door.setAttribute("x", "-9");
-  door.setAttribute("y", "-11");
-  door.setAttribute("width", "18");
-  door.setAttribute("height", "22");
-  door.setAttribute("rx", "2");
-  door.setAttribute("fill", "#7d8a96");
-  door.setAttribute("stroke", "#2b3138");
-  door.setAttribute("stroke-width", "2");
-
-  goal.appendChild(door);
-
-  
-  for (let i = -6; i <= 6; i += 4) {
-    const bar = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    bar.setAttribute("x1", i);
-    bar.setAttribute("y1", "-11");
-    bar.setAttribute("x2", i);
-    bar.setAttribute("y2", "11");
-    bar.setAttribute("stroke", "#e1e6eb");
-    bar.setAttribute("stroke-width", "1.6");
-    goal.appendChild(bar);
+  // Pobriše vse elemente iz SVG skupine
+  function clearSvg(group) {
+    while (group.firstChild) {
+      group.removeChild(group.firstChild);
+    }
   }
 
-  
-  const opening = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  opening.setAttribute("cx", "0");
-  opening.setAttribute("cy", "5");
-  opening.setAttribute("r", "2");
-  opening.setAttribute("fill", "#d6b34b");
+  // V SVG skupino nariše emoji
+  function setSvgEmoji(group, emoji, size) {
+    clearSvg(group);
 
-  goal.appendChild(opening);
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute("x", "0");
+    text.setAttribute("y", "0");
+    text.setAttribute("text-anchor", "middle");
+    text.setAttribute("dominant-baseline", "central");
+    text.setAttribute("font-size", size);
+    text.textContent = emoji;
 
-  goal.setAttribute("opacity", "1");
-}
+    group.appendChild(text);
+  }
 
+  // Nastavi pozicijo igralca v SVG
+  function setPlayer(px, py) {
+    player.setAttribute("transform", `translate(${px},${py})`);
+  }
+
+  // Zaklenjen cilj ne nariše ničesar
+  function drawLockedGoal() {
+    clearSvg(goal);
+  }
+
+  // Odklenjen cilj nariše zelen krog
+  function drawUnlockedGoal() {
+    clearSvg(goal);
+
+    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    circle.setAttribute("cx", "0");
+    circle.setAttribute("cy", "0");
+    circle.setAttribute("r", "6");
+    circle.setAttribute("fill", "#4f8a5b");
+    circle.setAttribute("stroke", "#1f2328");
+    circle.setAttribute("stroke-width", "1.5");
+
+    goal.appendChild(circle);
+  }
+
+  // Nastavi cilj kot zaklenjen
   function lockGoal() {
     goalUnlocked = false;
-    hud.classList.remove("hud--done", "hud--pulse");
-    drawLockedDoor();
+    drawLockedGoal();
   }
 
+  // Nastavi cilj kot odklenjen
   function unlockGoal() {
     goalUnlocked = true;
-    drawUnlockedDoor();
-
-    goal.style.transition = "transform 0.2s ease";
-    goal.style.transformOrigin = "center";
-    goal.style.transform = "scale(1.2)";
-
-    setTimeout(() => {
-      goal.style.transform = "scale(1)";
-    }, 200);
-
-    setHud("VSI KLJUČI POBRANI! ODKLENI IZHOD");
-    hud.classList.add("hud--done", "hud--pulse");
-
-    setTimeout(() => {
-      hud.classList.remove("hud--pulse");
-    }, 700);
+    drawUnlockedGoal();
+    updateStats();
   }
 
-  let stepToggle = false;
-let lastFootprintX = null;
-let lastFootprintY = null;
-
-function resetTrail() {
-  stepToggle = false;
-  lastFootprintX = null;
-  lastFootprintY = null;
-}
-
-function addTrail(x, y) {
-  if (
-    lastFootprintX !== null &&
-    Math.hypot(x - lastFootprintX, y - lastFootprintY) < 10
-  ) {
-    return;
-  }
-
-  stepToggle = !stepToggle;
-
-  const offsetX = stepToggle ? -2.2 : 2.2;
-  const offsetY = 0.8;
-
-  const footprint = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
-  footprint.setAttribute("cx", x + offsetX);
-  footprint.setAttribute("cy", y + offsetY);
-  footprint.setAttribute("rx", "1.4");
-  footprint.setAttribute("ry", "2.4");
-  footprint.setAttribute("fill", "#3f4348");
-  footprint.setAttribute("opacity", "0.55");
-  footprint.style.pointerEvents = "none";
-
-  svg.insertBefore(footprint, player);
-
-  lastFootprintX = x;
-  lastFootprintY = y;
-
-  setTimeout(() => {
-    footprint.remove();
-  }, 2500);
-}
-
- function setPlayer(x, y) {
-  player.setAttribute("transform", `translate(${x},${y})`);
-  addTrail(x, y);
-}
-
-function placePlayerOnCell(cell) {
-  const p = cellToPoint(cell.col, cell.row);
-  player.setAttribute("transform", `translate(${p.x},${p.y})`);
-  addTrail(p.x, p.y);
-}
-
-  function clearKeys() {
-    for (const item of keysToCollect) {
-      item.el.remove();
-    }
-    keysToCollect = [];
-    collected = 0;
-  }
-
-  function makeKey(x, y) {
-    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
-    g.setAttribute("transform", `translate(${x}, ${y})`);
-    g.style.pointerEvents = "none";
-
-    const ring = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    ring.setAttribute("cx", "-3");
-    ring.setAttribute("cy", "0");
-    ring.setAttribute("r", "4");
-    ring.setAttribute("fill", "none");
-    ring.setAttribute("stroke", "#d6b34b");
-    ring.setAttribute("stroke-width", "2");
-
-    const shaft = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    shaft.setAttribute("x1", "1");
-    shaft.setAttribute("y1", "0");
-    shaft.setAttribute("x2", "8");
-    shaft.setAttribute("y2", "0");
-    shaft.setAttribute("stroke", "#d6b34b");
-    shaft.setAttribute("stroke-width", "2");
-
-    const tooth1 = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tooth1.setAttribute("x1", "5");
-    tooth1.setAttribute("y1", "0");
-    tooth1.setAttribute("x2", "5");
-    tooth1.setAttribute("y2", "3");
-    tooth1.setAttribute("stroke", "#d6b34b");
-    tooth1.setAttribute("stroke-width", "2");
-
-    const tooth2 = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    tooth2.setAttribute("x1", "8");
-    tooth2.setAttribute("y1", "0");
-    tooth2.setAttribute("x2", "8");
-    tooth2.setAttribute("y2", "2");
-    tooth2.setAttribute("stroke", "#d6b34b");
-    tooth2.setAttribute("stroke-width", "2");
-
-    g.appendChild(ring);
-    g.appendChild(shaft);
-    g.appendChild(tooth1);
-    g.appendChild(tooth2);
-
-    svg.insertBefore(g, player);
-    return g;
-  }
-
+  // Ustvari unikaten ključ za zid med dvema točkama
+  // Uporablja se za shranjevanje v Set
   function lineKey(x1, y1, x2, y2) {
     const a = `${x1},${y1}`;
     const b = `${x2},${y2}`;
     return a < b ? `${a}|${b}` : `${b}|${a}`;
   }
 
-  function getMazeLines() {
-    const g = svg.querySelector("g");
-    if (!g) return [];
-    return Array.from(g.querySelectorAll("line")).map(line => ({
-      x1: parseFloat(line.getAttribute("x1")),
-      y1: parseFloat(line.getAttribute("y1")),
-      x2: parseFloat(line.getAttribute("x2")),
-      y2: parseFloat(line.getAttribute("y2")),
-    }));
-  }
+  // Prebere vse <line> elemente v SVG in jih pretvori v "zidove"
+  function buildWalls() {
+    walls.clear();
 
-  const wallSet = new Set();
+    const group = svg.querySelector("g");
+    if (!group) return;
 
-  function addSegmentWall(x1, y1, x2, y2) {
-    wallSet.add(lineKey(x1, y1, x2, y2));
-  }
+    const lines = group.querySelectorAll("line");
 
-  function buildWallSet() {
-    wallSet.clear();
+    for (const line of lines) {
+      const x1 = Number(line.getAttribute("x1"));
+      const y1 = Number(line.getAttribute("y1"));
+      const x2 = Number(line.getAttribute("x2"));
+      const y2 = Number(line.getAttribute("y2"));
 
-    const lines = getMazeLines();
+      // Horizontalne črte razdelimo na segmente dolžine STEP
+      if (y1 === y2) {
+        const minX = Math.min(x1, x2);
+        const maxX = Math.max(x1, x2);
 
-    for (const l of lines) {
-      if (Math.abs(l.y1 - l.y2) < 0.001) {
-        const y = l.y1;
-        const minX = Math.min(l.x1, l.x2);
-        const maxX = Math.max(l.x1, l.x2);
-
-        for (let x = minX; x < maxX - 0.001; x += GRID) {
-          addSegmentWall(x, y, x + GRID, y);
+        for (let xPart = minX; xPart < maxX; xPart += STEP) {
+          walls.add(lineKey(xPart, y1, xPart + STEP, y1));
         }
-      } else if (Math.abs(l.x1 - l.x2) < 0.001) {
-        const x = l.x1;
-        const minY = Math.min(l.y1, l.y2);
-        const maxY = Math.max(l.y1, l.y2);
+      }
 
-        for (let y = minY; y < maxY - 0.001; y += GRID) {
-          addSegmentWall(x, y, x, y + GRID);
+      // Vertikalne črte razdelimo na segmente dolžine STEP
+      if (x1 === x2) {
+        const minY = Math.min(y1, y2);
+        const maxY = Math.max(y1, y2);
+
+        for (let yPart = minY; yPart < maxY; yPart += STEP) {
+          walls.add(lineKey(x1, yPart, x1, yPart + STEP));
         }
       }
     }
   }
 
-  function hasHorizontalWall(x1, x2, y) {
-    return wallSet.has(lineKey(x1, y, x2, y));
+  // Preveri, ali obstaja horizontalni zid
+  function hasHorizontalWall(x1, x2, yLine) {
+    return walls.has(lineKey(x1, yLine, x2, yLine));
   }
 
-  function hasVerticalWall(x, y1, y2) {
-    return wallSet.has(lineKey(x, y1, x, y2));
-  }
+  // Preveri, ali obstaja vertikalni zid
+  function hasVerticalWall(xLine, y1, y2) {
+  return walls.has(lineKey(xLine, y1, xLine, y2));
+}
 
-  function canMove(col, row, dir) {
-    if (ghostMode) {
-      if (dir === "up") return row > 0;
-      if (dir === "down") return row < ROWS - 1;
-      if (dir === "left") return col > 0;
-      if (dir === "right") return col < COLS - 1;
+  // Preveri, ali se igralec lahko premakne v dano smer
+  function canMove(px, py, dir) {
+    // V cheat mode samo preverimo robove igralnega polja
+    if (cheatMode) {
+      if (dir === "up") return py > MIN;
+      if (dir === "down") return py < MAX;
+      if (dir === "left") return px > MIN;
+      if (dir === "right") return px < MAX;
       return false;
     }
 
+    // Normalen način: preverjamo tudi zidove
     if (dir === "up") {
-      if (row <= 0) return false;
-      const y = 2 + row * GRID;
-      const x1 = 2 + col * GRID;
-      const x2 = x1 + GRID;
-      return !hasHorizontalWall(x1, x2, y);
+      if (py <= MIN) return false;
+      return !hasHorizontalWall(px - HALF, px + HALF, py - HALF);
     }
 
     if (dir === "down") {
-      if (row >= ROWS - 1) return false;
-      const y = 2 + (row + 1) * GRID;
-      const x1 = 2 + col * GRID;
-      const x2 = x1 + GRID;
-      return !hasHorizontalWall(x1, x2, y);
+      if (py >= MAX) return false;
+      return !hasHorizontalWall(px - HALF, px + HALF, py + HALF);
     }
 
     if (dir === "left") {
-      if (col <= 0) return false;
-      const x = 2 + col * GRID;
-      const y1 = 2 + row * GRID;
-      const y2 = y1 + GRID;
-      return !hasVerticalWall(x, y1, y2);
+      if (px <= MIN) return false;
+      return !hasVerticalWall(px - HALF, py - HALF, py + HALF);
     }
 
     if (dir === "right") {
-      if (col >= COLS - 1) return false;
-      const x = 2 + (col + 1) * GRID;
-      const y1 = 2 + row * GRID;
-      const y2 = y1 + GRID;
-      return !hasVerticalWall(x, y1, y2);
+      if (px >= MAX) return false;
+      return !hasVerticalWall(px + HALF, py - HALF, py + HALF);
     }
 
     return false;
   }
 
-  function getNeighbors(cell) {
-    const result = [];
+  // Vrne vse sosednje točke, kamor lahko gre igralec
+  function getNeighbors(point) {
+    const list = [];
 
-    if (canMove(cell.col, cell.row, "up")) {
-      result.push({ col: cell.col, row: cell.row - 1 });
+    if (canMove(point.x, point.y, "up")) {
+      list.push({ x: point.x, y: point.y - STEP });
     }
-    if (canMove(cell.col, cell.row, "down")) {
-      result.push({ col: cell.col, row: cell.row + 1 });
+    if (canMove(point.x, point.y, "down")) {
+      list.push({ x: point.x, y: point.y + STEP });
     }
-    if (canMove(cell.col, cell.row, "left")) {
-      result.push({ col: cell.col - 1, row: cell.row });
+    if (canMove(point.x, point.y, "left")) {
+      list.push({ x: point.x - STEP, y: point.y });
     }
-    if (canMove(cell.col, cell.row, "right")) {
-      result.push({ col: cell.col + 1, row: cell.row });
+    if (canMove(point.x, point.y, "right")) {
+      list.push({ x: point.x + STEP, y: point.y });
     }
 
-    return result;
+    return list;
   }
 
-  function getReachableCells(startCell) {
+  // BFS algoritem: poišče vse dosegljive točke od začetka
+  function getReachablePoints(startPoint) {
     const visited = new Set();
-    const queue = [startCell];
+    const queue = [startPoint];
     const result = [];
 
-    visited.add(cellKey(startCell.col, startCell.row));
+    visited.add(`${startPoint.x},${startPoint.y}`);
 
-    while (queue.length) {
+    while (queue.length > 0) {
       const current = queue.shift();
       result.push(current);
 
-      for (const neighbor of getNeighbors(current)) {
-        const k = cellKey(neighbor.col, neighbor.row);
-        if (!visited.has(k)) {
-          visited.add(k);
-          queue.push(neighbor);
+      const neighbors = getNeighbors(current);
+
+      for (const n of neighbors) {
+        const id = `${n.x},${n.y}`;
+
+        if (!visited.has(id)) {
+          visited.add(id);
+          queue.push(n);
         }
       }
     }
@@ -450,119 +323,145 @@ function placePlayerOnCell(cell) {
     return result;
   }
 
-  function spawnRandomKeys(count) {
+  // Naključno premeša array
+  function shuffle(array) {
+    const arr = [...array];
+
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const temp = arr[i];
+      arr[i] = arr[j];
+      arr[j] = temp;
+    }
+
+    return arr;
+  }
+
+  // Preveri, ali sta dve točki enaki
+  function samePoint(a, b) {
+    return a.x === b.x && a.y === b.y;
+  }
+
+  // Ustvari ključ v SVG na določeni poziciji
+  function createKey(px, py) {
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("transform", `translate(${px},${py})`);
+    g.style.pointerEvents = "none";
+
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute("x", "0");
+    text.setAttribute("y", "0");
+    text.setAttribute("text-anchor", "middle");
+    text.setAttribute("dominant-baseline", "central");
+    text.setAttribute("font-size", "14");
+    text.textContent = "🗝️";
+
+    g.appendChild(text);
+    svg.insertBefore(g, player);
+
+    return { x: px, y: py, el: g };
+  }
+
+  // Pobriše vse obstoječe ključe
+  function clearKeys() {
+    for (const key of keys) {
+      key.el.remove();
+    }
+
+    keys = [];
+    collectedKeys = 0;
+  }
+
+  // Postavi ključe na naključne dosegljive pozicije
+  function spawnKeys() {
     clearKeys();
 
-    const reachable = getReachableCells(START).filter(cell => {
-      return !sameCell(cell, START) && !sameCell(cell, GOAL);
+    const reachable = getReachablePoints(START).filter(function (point) {
+      return !samePoint(point, START) && !samePoint(point, END);
     });
 
-    const selected = shuffle(reachable).slice(0, Math.min(count, reachable.length));
+    const chosen = shuffle(reachable).slice(0, KEY_COUNT);
 
-    for (const cell of selected) {
-      const p = cellToPoint(cell.col, cell.row);
-      const el = makeKey(p.x, p.y);
+    keys = chosen.map(function (point) {
+      return createKey(point.x, point.y);
+    });
 
-      keysToCollect.push({
-        el,
-        x: p.x,
-        y: p.y,
-        col: cell.col,
-        row: cell.row,
-      });
-    }
-
-    setHud(`KLJUČI: 0 / ${keysToCollect.length}`);
+    updateStats();
   }
 
- function collectKeysIfTouching() {
-  const transform = player.getAttribute("transform") || "translate(0,0)";
-  const match = transform.match(/translate\(([-\d.]+),([-\d.]+)\)/);
+  // Preveri, ali je igralec stopil na ključ
+  function collectKey() {
+    const remaining = [];
 
-  const px = match ? parseFloat(match[1]) : 0;
-  const py = match ? parseFloat(match[2]) : 0;
-
-  const TOUCH_DIST = 8;
-  let changed = false;
-
-  keysToCollect = keysToCollect.filter(item => {
-    const hit = Math.hypot(px - item.x, py - item.y) <= TOUCH_DIST;
-    if (hit) {
-      item.el.remove();
-      collected++;
-      changed = true;
-      return false;
+    for (const key of keys) {
+      if (key.x === x && key.y === y) {
+        key.el.remove();
+        collectedKeys++;
+      } else {
+        remaining.push(key);
+      }
     }
-    return true;
-  });
 
-  if (changed && !goalUnlocked) {
-    if (ghostMode) {
-      setHud(`CHEAT MODE | KLJUČI: ${collected} / ${collected + keysToCollect.length}`);
+    keys = remaining;
+
+    // Ko pobere vse ključe, odklenemo cilj
+    if (keys.length === 0 && !goalUnlocked) {
+      unlockGoal();
     } else {
-      setHud(`KLJUČI: ${collected} / ${collected + keysToCollect.length}`);
+      updateStats();
     }
   }
 
-  if (!goalUnlocked && keysToCollect.length === 0) {
-    unlockGoal();
-  }
-}
-
+  // Preveri, ali je igralec zmagal
   function checkWin() {
-  if (!goalUnlocked) return false;
+    if (!goalUnlocked) return false;
+    if (x !== END.x || y !== END.y) return false;
 
-  const transform = player.getAttribute("transform") || "translate(0,0)";
-  const match = transform.match(/translate\(([-\d.]+),([-\d.]+)\)/);
+    gameRunning = false;
+    moving = false;
+    keyOrder = [];
+    finishTime = performance.now();
 
-  const px = match ? parseFloat(match[1]) : 0;
-  const py = match ? parseFloat(match[2]) : 0;
+    updateStats();
 
-  const gx = parseFloat(goal.getAttribute("data-x"));
-  const gy = parseFloat(goal.getAttribute("data-y"));
+    // Če SweetAlert knjižnica ni naložena, uporabimo navaden alert
+    if (typeof Swal === "undefined") {
+      alert(
+        "Uspeh! Pobral si vse ključe in prišel do cilja.\n" +
+        "Čas: " + getTimeText() + "\n" +
+        "Premiki: " + moveCount
+      );
+      location.reload();
+      return true;
+    }
 
-  const winDistance = 10;
-  const onGoal = Math.hypot(px - gx, py - gy) <= winDistance;
+    // Lep popup ob zmagi
+    Swal.fire({
+      title: "POBEG USPEL!",
+      text: `Čas: ${getTimeText()} | Premiki: ${moveCount}`,
+      icon: "success",
+      confirmButtonText: "Igraj znova",
+      buttonsStyling: false,
+      customClass: {
+        popup: "prison-popup",
+        title: "prison-title",
+        htmlContainer: "prison-text",
+        confirmButton: "prison-confirm btn"
+      },
+      focusConfirm: false,
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+      scrollbarPadding: false,
+      heightAuto: false
+    }).then(function () {
+      location.reload();
+    });
 
-  if (!onGoal) return false;
-
-  running = false;
-  modalOpen = true;
-  moving = false;
-  keyQueue = [];
-
-  if (typeof Swal === "undefined") {
-    alert("Uspeh! Pobral si vse ključe in odklenil izhod!");
-    location.reload();
     return true;
   }
 
-  Swal.fire({
-    title: "POBEG USPEL!",
-    text: "Pobral si vse ključe in odklenil izhod!",
-    icon: "success",
-    confirmButtonText: "Igraj znova",
-    buttonsStyling: false,
-    customClass: {
-      popup: "prison-popup",
-      title: "prison-title",
-      htmlContainer: "prison-text",
-      confirmButton: "prison-confirm btn"
-    },
-    focusConfirm: false,
-    allowOutsideClick: false,
-    allowEscapeKey: false,
-    scrollbarPadding: false,
-    heightAuto: false
-  }).then(() => {
-    modalOpen = false;
-    location.reload();
-  });
-
-  return true;
-}
-
-  function directionFromKey(key) {
+  // Pretvori tipko v smer premika
+  function keyToDir(key) {
     if (key === "ArrowUp") return "up";
     if (key === "ArrowDown") return "down";
     if (key === "ArrowLeft") return "left";
@@ -570,171 +469,229 @@ function placePlayerOnCell(cell) {
     return null;
   }
 
-  function nextCellFromDirection(cell, dir) {
-    if (dir === "up") return { col: cell.col, row: cell.row - 1 };
-    if (dir === "down") return { col: cell.col, row: cell.row + 1 };
-    if (dir === "left") return { col: cell.col - 1, row: cell.row };
-    if (dir === "right") return { col: cell.col + 1, row: cell.row };
-    return { ...cell };
-  }
-
+  // Izbere trenutno željeno smer glede na vrstni red pritisnjenih tipk
   function getWantedDirection() {
-    for (let i = keyQueue.length - 1; i >= 0; i--) {
-      const key = keyQueue[i];
-      if (pressedKeys[key]) return directionFromKey(key);
+    for (let i = keyOrder.length - 1; i >= 0; i--) {
+      const key = keyOrder[i];
+
+      if (pressedKeys[key]) {
+        const dir = keyToDir(key);
+
+        if (canMove(x, y, dir)) {
+          return dir;
+        }
+      }
     }
+
     return null;
   }
 
-  function tryStartMove() {
-    if (!running || moving) return;
+  // Začne nov premik igralca
+  function startMove() {
+    if (!gameRunning || moving) return;
 
     const dir = getWantedDirection();
     if (!dir) return;
 
-    if (!canMove(currentCell.col, currentCell.row, dir)) return;
+    fromX = x;
+    fromY = y;
+    toX = x;
+    toY = y;
 
-    moveFrom = { ...currentCell };
-    moveTo = nextCellFromDirection(currentCell, dir);
+    // Določimo novo ciljno točko
+    if (dir === "up") toY -= STEP;
+    if (dir === "down") toY += STEP;
+    if (dir === "left") toX -= STEP;
+    if (dir === "right") toX += STEP;
+
     moveProgress = 0;
     moving = true;
+    moveCount++;
+    updateStats();
   }
 
+  // Zažene novo igro
   function startGame() {
-    running = true;
-    modalOpen = false;
+    gameRunning = true;
     moving = false;
-    moveFrom = null;
-    moveTo = null;
     moveProgress = 0;
-    keyQueue = [];
+    lastTime = null;
 
-    for (const key of Object.keys(pressedKeys)) {
+    x = START.x;
+    y = START.y;
+    fromX = x;
+    fromY = y;
+    toX = x;
+    toY = y;
+
+    moveCount = 0;
+    finishTime = 0;
+    startTime = performance.now();
+
+    keyOrder = [];
+
+    // Pobrišemo stanje vseh tipk
+    for (const key in pressedKeys) {
       pressedKeys[key] = false;
     }
 
-    resetTrail();
+    setPlayer(x, y);
     lockGoal();
-    spawnRandomKeys(5);
-
-    currentCell = { ...START };
-    placePlayerOnCell(currentCell);
-    collectKeysIfTouching();
-
-    if (ghostMode) {
-      setHud(`CHEAT MODE | KLJUČI: ${collected} / ${collected + keysToCollect.length}`);
-    } else {
-      setHud(`KLJUČI: ${collected} / ${collected + keysToCollect.length}`);
-    }
+    spawnKeys();
+    collectKey();
+    updateStats();
   }
 
-  let lastTime = null;
-
-  function animate(timestamp) {
+  // Glavna animacijska zanka
+  function animate(time) {
     requestAnimationFrame(animate);
 
-    if (!running) {
-      lastTime = timestamp;
+    if (!gameRunning) {
+      lastTime = time;
       return;
     }
 
-    if (lastTime == null) {
-      lastTime = timestamp;
+    if (lastTime === null) {
+      lastTime = time;
+      updateStats();
       return;
     }
 
-    const dt = timestamp - lastTime;
-    lastTime = timestamp;
+    const dt = time - lastTime;
+    lastTime = time;
 
+    updateStats();
+
+    // Če se ne premikamo, poskusimo začeti nov premik
     if (!moving) {
-      tryStartMove();
+      startMove();
       return;
     }
 
-    moveProgress += dt / MOVE_DURATION;
-    const t = clamp(moveProgress, 0, 1);
+    // Napredujemo po animaciji
+    moveProgress += dt / MOVE_TIME;
 
-    const a = cellToPoint(moveFrom.col, moveFrom.row);
-    const b = cellToPoint(moveTo.col, moveTo.row);
+    if (moveProgress > 1) {
+      moveProgress = 1;
+    }
 
-    const x = a.x + (b.x - a.x) * t;
-    const y = a.y + (b.y - a.y) * t;
-    setPlayer(x, y);
+    // Smoothstep za bolj mehko animacijo
+    const t = moveProgress;
+    const smooth = t * t * (3 - 2 * t);
 
-    if (t >= 1) {
-      currentCell = { ...moveTo };
+    const drawX = fromX + (toX - fromX) * smooth;
+    const drawY = fromY + (toY - fromY) * smooth;
+
+    setPlayer(drawX, drawY);
+
+    // Ko animacija pride do konca, zaključimo premik
+    if (moveProgress >= 1) {
+      x = toX;
+      y = toY;
       moving = false;
-      moveFrom = null;
-      moveTo = null;
       moveProgress = 0;
 
-      collectKeysIfTouching();
-      if (checkWin()) return;
-
-      tryStartMove();
+      setPlayer(x, y);
+      collectKey();
+      checkWin();
+      startMove();
     }
   }
 
-  window.addEventListener("keydown", (e) => {
+  // Ko pritisnemo tipko
+  window.addEventListener("keydown", function (e) {
+    // F4 vklopi / izklopi cheat mode
     if (e.key === "F4") {
       e.preventDefault();
-      ghostMode = !ghostMode;
+      cheatMode = !cheatMode;
 
-      if (ghostMode) {
-        if (running) {
-          setHud(`CHEAT MODE | KLJUČI: ${collected} / ${collected + keysToCollect.length}`);
-        } else {
-          setHud("CHEAT MODE vklopljen — klikni START");
-        }
+      if (gameRunning) {
+        updateStats();
       } else {
-        if (running) {
-          if (goalUnlocked) {
-            setHud("VSI KLJUČI POBRANI! ODKLENI IZHOD");
-          } else {
-            setHud(`KLJUČI: ${collected} / ${collected + keysToCollect.length}`);
-          }
+        showInstructions();
+
+        if (cheatMode) {
+          setStatsHtml("CHEAT MODE<br>Klikni START");
         } else {
-          setHud("Klikni START in poberi 5 ključev");
+          setStatsHtml("Ključi: 0 / 5<br>Premiki: 0<br>Čas: 0.0 s");
         }
       }
+
       return;
     }
 
-    if (!Object.prototype.hasOwnProperty.call(pressedKeys, e.key)) return;
-    e.preventDefault();
-    if (modalOpen) return;
+    // Če tipka ni ena od puščic, ignoriramo
+    if (!(e.key in pressedKeys)) return;
 
+    e.preventDefault();
+
+    // Če tipka še ni bila pritisnjena, jo dodamo v vrstni red
     if (!pressedKeys[e.key]) {
-      keyQueue.push(e.key);
+      keyOrder.push(e.key);
     }
 
     pressedKeys[e.key] = true;
 
-    if (running && !moving) {
-      tryStartMove();
+    // Če igra teče in igralec trenutno miruje, takoj začnemo premik
+    if (gameRunning && !moving) {
+      startMove();
     }
   });
 
-  window.addEventListener("keyup", (e) => {
-    if (!Object.prototype.hasOwnProperty.call(pressedKeys, e.key)) return;
-    e.preventDefault();
-    if (modalOpen) return;
+  // Ko spustimo tipko
+  window.addEventListener("keyup", function (e) {
+    if (!(e.key in pressedKeys)) return;
 
+    e.preventDefault();
     pressedKeys[e.key] = false;
-    keyQueue = keyQueue.filter(key => key !== e.key);
+
+    // Odstranimo tipko iz vrstnega reda
+    keyOrder = keyOrder.filter(function (key) {
+      return key !== e.key;
+    });
   });
 
-  buildWallSet();
+  // Na začetku zgradimo zemljevid zidov
+  buildWalls();
 
-  const goalPoint = cellToPoint(GOAL.col, GOAL.row);
-  goal.setAttribute("transform", `translate(${goalPoint.x},${goalPoint.y})`);
-  goal.setAttribute("data-x", String(goalPoint.x));
-  goal.setAttribute("data-y", String(goalPoint.y));
+  // Postavimo cilj na pravo mesto
+  goal.setAttribute("transform", `translate(${END.x},${END.y})`);
 
-  btn.addEventListener("click", startGame);
-
+  // Nastavimo izgled igralca
+  setSvgEmoji(player, "🥷", "16");
   lockGoal();
-  setHud("Klikni START in poberi 5 ključev");
-  requestAnimationFrame(animate);
+  setPlayer(x, y);
+  showInstructions();
+  setStatsHtml("Ključi: 0 / 5<br>Premiki: 0<br>Čas: 0.0 s");
 
+  // Klik na START začne igro
+  startBtn.addEventListener("click", startGame);
+  mazeTitle.style.cursor = "pointer";
+
+  // Klik na naslov pokaže credits
+  mazeTitle.addEventListener("click", function () {
+    if (typeof Swal === "undefined") {
+      alert("Credits: Martin Furlan");
+      return;
+    }
+
+    Swal.fire({
+      title: "CREDITS",
+      html: "Martin Furlan",
+      confirmButtonText: "Zapri",
+      buttonsStyling: false,
+      customClass: {
+        popup: "prison-popup",
+        title: "prison-title",
+        htmlContainer: "prison-text",
+        confirmButton: "prison-confirm btn"
+      },
+      focusConfirm: false,
+      scrollbarPadding: false,
+      heightAuto: false
+    });
+  });
+
+  // Zaženemo animacijsko zanko
+  requestAnimationFrame(animate);
 });
